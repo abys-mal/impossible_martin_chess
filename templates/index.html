@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#171c19">
+  <title>Impossible Martin · Chess experiment</title>
+  <link rel="icon" href="{{ url_for('static', filename='pieces/bn.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script defer src="{{ url_for('static', filename='game.js') }}"></script>
+</head>
+<body>
+  <header class="site-header">
+    <a href="/" class="brand" aria-label="Impossible Martin home"><span class="brand-mark">im<span>.</span></span><span>IMPOSSIBLE<br>MARTIN</span></a>
+    <div class="header-note"><span class="live-dot"></span> LOCAL CHESS EXPERIMENT <span class="version">01</span></div>
+  </header>
+  <main>
+    <section class="intro">
+      <div><p class="eyebrow">CHESS, WITH A FEW COMPLICATIONS</p><h1>A fair game.<span> Almost.</span></h1></div>
+      <p class="intro-note">One very weak opponent.<br>One very unfair head start.</p>
+    </section>
+    <div class="game-layout">
+      <section class="board-section" aria-label="Chess game">
+        <div class="player-strip opponent-strip">
+          <div class="avatar martin-avatar">m<span>·</span></div>
+          <div class="player-info"><strong>Martin <span id="bot-color" class="color-label">BLACK</span></strong><small>Aspiring grandmaster · ~250 strength</small></div>
+          <div class="unlimited" title="Martin has unlimited time">∞ <span>UNLIMITED</span></div>
+        </div>
+        <div class="board-shell">
+          <div id="board" class="board" role="group" aria-label="Chessboard"></div>
+          <div id="board-banner" class="board-banner" hidden><span id="banner-text"></span><strong id="banner-count"></strong></div>
+        </div>
+        <div class="player-strip human-strip">
+          <div class="avatar human-avatar">Y</div>
+          <div class="player-info"><strong>You <span id="human-color" class="color-label">WHITE</span></strong><small id="human-note">A little patience goes a long way.</small></div>
+          <div id="human-clock" class="clock"><span class="clock-dot"></span><span id="clock-value">20:00</span></div>
+        </div>
+        <div class="board-footer"><span>Click a piece, then a square. Or drag to move.</span><button id="resign-button" class="text-button" disabled>Resign ↗</button></div>
+      </section>
+      <aside class="sidebar">
+        <section class="status-card">
+          <div class="card-topline"><span class="eyebrow">THE EXPERIMENT</span><span id="phase-pill" class="phase-pill">READY</span></div>
+          <h2 id="status-title">Meet your unfair match.</h2>
+          <p id="status-description">Martin isn't very good at chess. Unfortunately, he makes the rules.</p>
+          <div class="rule-summary"><div><span>01</span><p><strong>Three moves for Martin.</strong>Before you get a single one.</p></div><div><span>02</span><p><strong>Think before you move.</strong>Under 3 seconds? A 15-second wait.</p></div><div><span>03</span><p><strong>Twenty minutes. Just for you.</strong>The clock runs during penalties, too.</p></div></div>
+          <div id="initial-controls"><label class="control-label">YOUR SIDE</label><div class="color-picker" id="initial-color-picker"><button type="button" data-color="white" class="chosen" aria-pressed="true"><span class="white-disc"></span> White</button><button type="button" data-color="black" aria-pressed="false"><span class="black-disc"></span> Black</button></div></div>
+          <button id="new-game-button" class="primary-button">Start game <span>↗</span></button>
+          <p class="small-note">Weak at chess. Perfect at spotting mate in one.</p>
+        </section>
+        <section class="history-card"><div class="card-topline"><h3>Move history</h3><span id="move-count">0 ACTIONS</span></div><div id="history" class="history"><div class="empty-state"><span class="empty-symbol">↗</span><p>The story starts with<br>Martin's three-move head start.</p></div></div></section>
+        <section class="events-card"><div class="card-topline"><h3>Field notes</h3><span class="live-dot"></span></div><div id="events" class="events" role="log" aria-label="Game events"><p class="event-placeholder">Unusual things will happen here.</p></div></section>
+        <div class="seed-line"><span>GAME SEED</span><button id="seed-button" class="text-button" title="Copy seed" disabled>—</button><span id="connection-label">LOCAL SESSION</span></div>
+      </aside>
+    </div>
+    <p id="notice" class="notice" role="status" aria-live="polite"></p>
+  </main>
+  <footer class="site-footer"><span>IMPOSSIBLE MARTIN</span><span>An experiment in questionable chess etiquette.</span><span>NO ENGINE. NO MERCY.</span></footer>
+
+  <dialog id="new-dialog"><form id="new-form"><p class="eyebrow">A FRESH EXPERIMENT</p><h2>Take your side.</h2><p class="dialog-copy">Martin always moves first. Three times, in fact.</p><div class="color-picker" id="dialog-color-picker"><button type="button" data-color="white" class="chosen" aria-pressed="true"><span class="white-disc"></span> White</button><button type="button" data-color="black" aria-pressed="false"><span class="black-disc"></span> Black</button></div><label class="seed-input-label" for="seed-input">Seed <span>optional · replay Martin's randomness</span></label><input id="seed-input" inputmode="numeric" type="text" pattern="[0-9]*" placeholder="Random each game" maxlength="16"><p id="new-dialog-error" class="dialog-error" role="alert"></p><div class="dialog-actions"><button type="button" id="cancel-new" class="secondary-button">Cancel</button><button type="submit" class="primary-button">Start game ↗</button></div></form></dialog>
+  <dialog id="promotion-dialog"><p class="eyebrow">PAWN PROMOTION</p><h2>Choose your piece.</h2><div id="promotion-options" class="promotion-options"></div><button id="cancel-promotion" class="text-button">Cancel move</button></dialog>
+  <dialog id="resign-dialog"><p class="eyebrow">CALL IT A DAY?</p><h2>Resign this game?</h2><p class="dialog-copy">Martin will be insufferably proud of himself.</p><div class="dialog-actions"><button id="cancel-resign" class="secondary-button">Keep playing</button><button id="confirm-resign" class="primary-button">Resign</button></div></dialog>
+</body>
+</html>
