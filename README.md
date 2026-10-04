@@ -4,6 +4,8 @@ A local Flask + python-chess experiment with a weak, noisy beginner opponent
 and an aggressively unfair set of rules. No database, external engine, or remote
 assets. Martin's nominal ~250 strength is a design target, not a measured Elo.
 
+This project was inspired by this YouTube video: [https://www.youtube.com/watch?v=IqFPOly_Y48](https://www.youtube.com/watch?v=IqFPOly_Y48). It was programmed using Codex.
+
 ## Run
 
 From this project directory:
