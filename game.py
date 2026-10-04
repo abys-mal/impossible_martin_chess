@@ -28,9 +28,9 @@ class Game:
         self.seed = secrets.randbits(53) if seed is None else seed
         self.human_color = chess.WHITE if human_color == "white" else chess.BLACK
         self.bot_color = not self.human_color
-        # Separate streams prevent future handicap randomness changing bot choices.
-        self.bot = Martin(random.Random(self.seed))
-        self.rule_rng = random.Random(f"rules:{self.seed}")
+        self.rng = random.Random(self.seed)
+        self.bot = Martin(self.rng)
+        self.rule_rng = self.rng
         self.rules = rules or RuleLayer()
         self.position = Position()
         self.position.prepare_turn(self.bot_color, consecutive=True)
@@ -46,6 +46,9 @@ class Game:
         self.human_turn_since = None
         self.last_human_piece_id = None
         self.last_human_elapsed = None
+        self.human_turn_index = 0
+        self.premove = None
+        self.pending_result = None
         self.history = []
         self.events = deque(maxlen=50)
         self.revision = 0
@@ -69,6 +72,8 @@ class Game:
         self.status, self.phase = status, "finished"
         self.winner, self.result = winner, message
         self.due_at = None
+        self.premove = None
+        self.pending_result = None
         self.event("result", message)
 
     def check_timeout(self, now):
@@ -78,15 +83,10 @@ class Game:
         return False
 
     def terminal(self, now):
-        outcome = self.rules.outcome(self.position)
+        outcome = self.rules.outcome(self.position, self.context("human"))
         if outcome is None:
             return False
-        if outcome.winner is None:
-            self.finish("draw", f"Draw: {outcome.termination.name.lower().replace('_', ' ')}.", None, now)
-        else:
-            winner = "human" if outcome.winner == self.human_color else "martin"
-            self.finish("checkmate", "Checkmate. You win!" if winner == "human" else
-                        "Checkmate. Martin wins.", winner, now)
+        self.finish(outcome.status, outcome.message, outcome.winner, now)
         return True
 
     def context(self, actor):
@@ -98,22 +98,41 @@ class Game:
         board = self.position.board
         context = self.context(actor)
         color = "white" if board.turn else "black"
-        notation = plan.notation or (board.san(plan.move) if plan.execute is None
+        notation = plan.notation or (self.rules.notation(self.position, plan, context) if plan.execute is None
                                     else plan.move.uci())
         self.position.apply(plan)
         self.history.append({"action": len(self.history) + 1, "actor": actor,
                              "color": color, "uci": plan.move.uci(), "san": notation,
                              "phase": self.phase, "reason": reason,
                              "piece_id": self.position.last_piece_id})
+        self.history[-1].update(intended_uci=plan.intended_uci, kind=plan.kind)
         for message in self.rules.after_move(self.position, plan, context):
             self.event("rule", message)
+        if context.phase != "opening":
+            self.rules.record_position(self.position)
         self.revision += 1
 
     def start_human_turn(self, now):
         self.position.prepare_turn(self.human_color)
         self.phase, self.due_at = "human", None
         self.running_since = self.human_turn_since = now
+        self.human_turn_index += 1
         self.revision += 1
+        if self.terminal(now):
+            return
+        queued, self.premove = self.premove, None
+        if queued:
+            move = chess.Move.from_uci(queued["uci"])
+            if self.position.at.get(move.from_square) != queued["piece_id"]:
+                self.event("premove_discard", "Premove discarded: that piece is no longer there.")
+                return
+            legal = self.rules.get_human_legal_moves(self.position, self.context("human"))
+            if not any(plan.move == move for plan in legal):
+                self.event("premove_discard", "Premove discarded: it is no longer legal after Martin's move.")
+                return
+            accepted, message = self.complete_human_move(move, premove=True)
+            if not accepted:
+                self.event("premove_rejected", message or "Premove rejected. Choose another move.")
 
     def tick(self, now=None):
         """Called under lock by BOTH the background scheduler and API requests.
@@ -130,6 +149,10 @@ class Game:
             if self.check_timeout(deadline):
                 return
             self.stop_clock(deadline)
+            if self.pending_result:
+                result = self.pending_result
+                self.finish(result.status, result.message, result.winner, now)
+                return
             self.phase, self.due_at = "bot", deadline + self.bot_delay
             self.event("penalty_end", "Piece upright. Martin can move now.")
         if self.check_timeout(now):
@@ -141,19 +164,24 @@ class Game:
         self.position.prepare_turn(self.bot_color, consecutive=opening)
         # During the opening, checks do not hand the turn to the human. Mate is
         # still decisive; an actual checkmate ends the game immediately.
-        if not list(self.position.board.legal_moves):
+        if not self.rules.get_martin_legal_moves(self.position, self.context("martin")):
             self.terminal(now)
             return
-        choice = self.bot.choose(self.position.board, self.opening_done if opening else None)
-        plan = self.rules.validate(self.position, choice.move, self.context("martin"))
+        choice = self.bot.choose(self.position, self.rules, self.context("martin"),
+                                 self.opening_done if opening else None)
+        plan = choice.plan or self.rules.validate(self.position, choice.move, self.context("martin"))
         if not plan.accepted:
             raise RuntimeError("A Martin rule rejected its own available move: " + str(plan.message))
         self.commit(plan, "martin", choice.reason)
         completed_at = self.clock()
-        if self.terminal(completed_at):
-            return
         if opening:
             self.opening_done += 1
+            # Opening checkmate is decisive; mere lack of quiet human moves
+            # must wait until the actual human turn (after action three).
+            outcome = self.rules.outcome(self.position, self.context("human"))
+            if outcome and outcome.status == "checkmate":
+                self.finish(outcome.status, outcome.message, outcome.winner, completed_at)
+                return
             if self.opening_done < 3:
                 self.position.prepare_turn(self.bot_color, consecutive=True)
                 self.due_at = completed_at + self.opening_delay
@@ -161,6 +189,7 @@ class Game:
                 return
             # Begin standard repetition accounting at the handicap baseline.
             self.position.board.clear_stack()
+            self.rules.record_position(self.position)
             self.event("opening_complete", "Three moves for Martin. Your turn; your 20-minute clock starts now.")
         self.start_human_turn(completed_at)
 
@@ -177,29 +206,64 @@ class Game:
             move = chess.Move.from_uci(uci)
         except ValueError:
             return False, "Invalid move coordinates. Use a move such as e2e4."
-        piece = self.position.board.piece_at(move.from_square)
-        if piece is None or piece.color != self.human_color:
-            return False, "Choose one of your pieces."
+        return self.complete_human_move(move)
+
+    def complete_human_move(self, move, *, premove=False):
+        now = self.clock()
+        if self.check_timeout(now):
+            return False, "Time's up."
+        previously_refused = set(self.position.refused_captures)
         plan = self.rules.validate(self.position, move, self.context("human"))
         if not plan.accepted:
+            # Illegal attempts do not consume a turn. Refusals must be visible
+            # and invalidate stale clients; all other rejections also get notes.
+            kind = "capture_refused" if self.position.refused_captures != previously_refused else "rejected"
+            self.event(kind, plan.message or "Move rejected.")
             return False, plan.message
         # Include validation time, since acceptance is the completion boundary.
         now = self.clock()
         if self.check_timeout(now):
             return False, "Time's up."
-        self.last_human_elapsed = now - self.human_turn_since
+        self.last_human_elapsed = 0.0 if premove else now - self.human_turn_since
         self.commit(plan, "human")
+        self.history[-1]["premove"] = premove
         self.last_human_piece_id = self.position.last_piece_id
-        if self.terminal(now):
-            return True, self.result
         if self.last_human_elapsed < SPEED_THRESHOLD:
+            self.pending_result = self.rules.outcome(self.position, self.context("human"))
             self.phase, self.due_at = "penalty", now + PENALTY_SECONDS
             self.event("penalty", "You moved too quickly and knocked over a piece!")
             # Keep the already-running human clock running during the real wait.
         else:
+            if self.terminal(now):
+                return True, self.result
             self.stop_clock(now)
             self.phase, self.due_at = "bot", now + self.bot_delay
             self.revision += 1
+        return True, None
+
+    def queue_premove(self, uci, game_id, target_turn):
+        self.tick()
+        if game_id != self.id or target_turn != self.human_turn_index + 1:
+            return False, "The turn changed. Choose a premove again."
+        if self.phase not in ("opening", "bot"):
+            return False, "Premoves are available only while Martin is moving, never during a penalty."
+        if uci is None:
+            self.premove = None
+            self.event("premove_cancel", "Premove cancelled.")
+            return True, None
+        try:
+            move = chess.Move.from_uci(uci) if isinstance(uci, str) else None
+        except ValueError:
+            move = None
+        if move is None or not move:
+            return False, "Send a premove such as g1f3."
+        context = self.context("human")
+        message = self.rules.validate_premove(self.position, move, context)
+        if message:
+            return False, message
+        self.premove = {"uci": move.uci(), "piece_id": self.position.at[move.from_square],
+                        "target_turn": target_turn}
+        self.event("premove", f"Premove queued: {move.uci()}. If it works, you will have to wait 15 seconds.")
         return True, None
 
     def resign(self):
@@ -223,6 +287,12 @@ class Game:
                 "human_time": self.remaining(now), "clock_running": self.running_since is not None,
                 "penalty_remaining": max(0, self.due_at - now) if self.phase == "penalty" else 0,
                 "opening_done": self.opening_done, "last_human_elapsed": self.last_human_elapsed,
+                "human_turn_index": self.human_turn_index, "premove": self.premove,
+                "resting_piece_id": self.position.resting_piece_id,
+                "refused_captures": sorted(self.position.refused_captures),
+                "premove_moves": [plan.move.uci() for plan in self.rules.get_human_legal_moves(
+                    self.position, self.context("human"), premove=True)]
+                    if self.phase in ("opening", "bot") else [],
                 "in_check": self.position.board.is_check(),
                 "legal_moves": self.rules.human_move_hints(self.position, self.context("human"))
                     if self.phase == "human" else [],

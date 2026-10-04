@@ -6,7 +6,7 @@ import chess
 from app import create_app
 from game import Game
 from martin import Martin, BotChoice
-from rules import Position, RuleLayer, MovePlan
+from rules import Position, RuleLayer, MovePlan, RuleContext
 
 
 class Clock:
@@ -45,7 +45,7 @@ class GameTests(unittest.TestCase):
         clock = Clock()
         game = Game(clock=clock, opening_delay=1)
         for action in range(3):
-            self.assertFalse(attempt(game, "e2e4")[0])
+            self.assertFalse(attempt(game, "e2e3")[0])
             self.assertEqual(game.remaining(clock()), 1200)
             clock.advance(1)
             game.tick()
@@ -54,7 +54,7 @@ class GameTests(unittest.TestCase):
     def test_real_penalty_boundary_and_no_bot_early(self):
         game, clock = started()
         clock.advance(2.999)
-        self.assertTrue(attempt(game,"e2e4")[0])
+        self.assertTrue(attempt(game,"e2e3")[0])
         self.assertEqual(game.phase,"penalty")
         self.assertEqual(len(game.history),4)
         initial = game.remaining(clock())
@@ -81,7 +81,7 @@ class GameTests(unittest.TestCase):
     def test_exact_three_seconds_no_penalty(self):
         game, clock = started()
         clock.advance(3)
-        self.assertTrue(attempt(game,"e2e4")[0])
+        self.assertTrue(attempt(game,"e2e3")[0])
         self.assertEqual(game.phase,"bot")
         self.assertEqual(game.remaining(clock()),1197)
         clock.advance(.7)
@@ -91,7 +91,7 @@ class GameTests(unittest.TestCase):
 
     def test_zero_second_move_penalized(self):
         game, clock = started()
-        self.assertTrue(attempt(game,"e2e4")[0])
+        self.assertTrue(attempt(game,"e2e3")[0])
         self.assertEqual(game.phase,"penalty")
         self.assertEqual(game.snapshot()["penalty_remaining"],15)
 
@@ -99,7 +99,7 @@ class GameTests(unittest.TestCase):
         game, clock = started()
         game.human_remaining = 4
         clock.advance(1)
-        self.assertTrue(attempt(game,"e2e4")[0])
+        self.assertTrue(attempt(game,"e2e3")[0])
         clock.advance(3)
         game.tick()
         self.assertEqual(game.status,"timeout")
@@ -112,12 +112,12 @@ class GameTests(unittest.TestCase):
         clock.advance(1200)
         game.tick()
         self.assertEqual(game.status,"timeout")
-        self.assertFalse(attempt(game,"e2e4")[0])
+        self.assertFalse(attempt(game,"e2e3")[0])
 
     def test_scheduler_lateness_does_not_bill_bot_thinking(self):
         game, clock = started()
         clock.advance(1)
-        attempt(game,"e2e4")
+        attempt(game,"e2e3")
         clock.advance(100)
         game.tick()
         self.assertEqual(game.phase,"human")
@@ -126,7 +126,7 @@ class GameTests(unittest.TestCase):
     def test_clock_expires_before_late_penalty_tick(self):
         game, clock = started()
         game.human_remaining=10
-        attempt(game,"e2e4")
+        attempt(game,"e2e3")
         clock.advance(100)
         game.tick()
         self.assertEqual(game.status,"timeout")
@@ -141,16 +141,16 @@ class GameTests(unittest.TestCase):
         self.assertEqual(game.position.board.fen(),fen)
         self.assertEqual(game.remaining(clock()),1199)
         clock.advance(2)
-        self.assertTrue(attempt(game,"e2e4")[0])
+        self.assertTrue(attempt(game,"e2e3")[0])
         self.assertEqual(game.phase,"bot")
 
     def test_stale_revision_and_game_id_rejected(self):
         game, clock = started()
         clock.advance(3)
-        self.assertFalse(game.attempt_move("e2e4","other",game.revision)[0])
-        self.assertFalse(game.attempt_move("e2e4",game.id,game.revision-1)[0])
+        self.assertFalse(game.attempt_move("e2e3","other",game.revision)[0])
+        self.assertFalse(game.attempt_move("e2e3",game.id,game.revision-1)[0])
         self.assertEqual(len(game.history),3)
-        self.assertTrue(attempt(game,"e2e4")[0])
+        self.assertTrue(attempt(game,"e2e3")[0])
         self.assertFalse(attempt(game,"d2d4")[0])
 
     def test_resign_freezes_clock(self):
@@ -164,6 +164,7 @@ class GameTests(unittest.TestCase):
     def test_human_checkmate_finishes_without_another_bot_move(self):
         game,clock=started()
         game.position=Position("7k/5Q2/6K1/8/8/8/8/8 w - - 0 1")
+        clock.advance(3)
         self.assertTrue(attempt(game,"f7g7")[0])
         self.assertEqual(game.status,"checkmate")
         self.assertEqual(game.winner,"human")
@@ -179,13 +180,15 @@ class GameTests(unittest.TestCase):
         self.assertEqual(game.winner,"martin")
         self.assertEqual(game.history[-1]["reason"],"mate_in_one")
 
-    def test_human_underpromotion_accepted_and_reported(self):
+    def test_human_pawn_stays_pawn_and_reports_event(self):
         game,clock=started()
         game.position=Position("4k3/P7/8/8/8/8/8/4K3 w - - 0 1")
         clock.advance(4)
-        self.assertTrue(attempt(game,"a7a8n")[0])
-        self.assertEqual(game.position.board.piece_at(chess.A8).piece_type,chess.KNIGHT)
-        self.assertEqual(game.status,"draw")
+        self.assertFalse(attempt(game,"a7a8n")[0])
+        self.assertTrue(attempt(game,"a7a8")[0])
+        self.assertEqual(game.position.board.piece_at(chess.A8).piece_type,chess.PAWN)
+        self.assertEqual(game.status,"playing")
+        self.assertTrue(any('remains a pawn' in e['message'] for e in game.events))
 
     def test_stalemate_draw(self):
         game,clock=started()
@@ -212,9 +215,9 @@ class GameTests(unittest.TestCase):
     def test_checks_do_not_interrupt_opening(self):
         clock=Clock()
         game=Game("white",1,clock=clock,opening_delay=0)
-        game.position=Position("3qk3/4p3/8/8/8/K7/8/8 b - - 0 1")
+        game.position=Position("3qk3/4p3/8/8/8/K7/2N5/8 b - - 0 1")
         scripted=["e7e5","d8e7","e8d8"]
-        game.bot.choose=lambda board,action: BotChoice(chess.Move.from_uci(scripted[action]),"test")
+        game.bot.choose=lambda position,rules,context,action: BotChoice(chess.Move.from_uci(scripted[action]),"test")
         game.tick(); game.tick()
         self.assertEqual(game.opening_done,2)
         self.assertEqual(game.phase,"opening")
@@ -232,21 +235,25 @@ class BotTests(unittest.TestCase):
         for uci in ["f2f3","e7e5","g2g4"]: fools.push_uci(uci)
         boards.append(fools)
         for board in boards:
-            self.assertTrue(Martin.mating_moves(board,list(board.legal_moves)))
-            for seed in range(40):
+            position=Position(board.fen()); rules=RuleLayer()
+            context=RuleContext("martin",not board.turn,"bot",1,None,random.Random(0))
+            self.assertTrue(Martin.mating_moves(position,rules.get_martin_legal_moves(position,context),rules,context))
+            for seed in range(10):
                 for action in [None,0,1,2]:
                     with self.subTest(fen=board.fen(),seed=seed,action=action):
-                        choice=Martin(random.Random(seed)).choose(board,action)
-                        probe=board.copy(); probe.push(choice.move)
-                        self.assertTrue(probe.is_checkmate())
+                        choice=Martin(random.Random(seed)).choose(position,rules,context,action)
+                        result=rules.outcome(rules.project(position,choice.plan,context),context)
+                        self.assertEqual(result.status,"checkmate")
+                        self.assertEqual(result.winner,"martin")
 
     def test_fallback_move_and_randomness(self):
-        board=chess.Board()
+        position=Position(); rules=RuleLayer()
+        context=RuleContext("martin",chess.BLACK,"opening",1,None,random.Random(0))
         for action in range(3):
-            choice=Martin(random.Random(1)).choose(board,action)
-            self.assertIn(choice.move,board.legal_moves)
-            board.push(choice.move); board.turn=chess.WHITE; board.ep_square=None
-        moves={Martin(random.Random(seed)).choose(chess.Board()).move.uci() for seed in range(40)}
+            choice=Martin(random.Random(1)).choose(position,rules,context,action)
+            self.assertIn(choice.move,[p.move for p in rules.get_martin_legal_moves(position,context)])
+            position.apply(choice.plan); position.prepare_turn(chess.WHITE,consecutive=True)
+        moves={Martin(random.Random(seed)).choose(Position(),rules,context).move.uci() for seed in range(40)}
         self.assertGreater(len(moves),5)
 
 
@@ -337,7 +344,7 @@ class ApiTests(unittest.TestCase):
         state=self.client.get("/api/state").json
         state=self.client.get("/api/state").json
         self.clock.advance(4)
-        response=self.client.post("/api/move",json={"move":"e2e4","game_id":state["game_id"],"revision":state["revision"],"human_time":99999})
+        response=self.client.post("/api/move",json={"move":"e2e3","game_id":state["game_id"],"revision":state["revision"],"human_time":99999})
         self.assertEqual(response.status_code,200)
         self.assertTrue(response.json["accepted"])
         self.assertEqual(response.json["human_time"],1196)

@@ -5,7 +5,7 @@ const board = $("#board");
 let state = null, selected = null, color = "white", busy = false, online = true;
 let receiptTime = performance.now(), requestSerial = 0, appliedSerial = 0;
 let renderedRevision = -1, renderedGame = null, renderedColor = null;
-let drag = null, suppressClick = false, promotion = null;
+let drag = null, suppressClick = false;
 const names = {p:"pawn",n:"knight",b:"bishop",r:"rook",q:"queen",k:"king"};
 const initialPieces = [];
 for (let file = 0; file < 8; file++) {
@@ -14,7 +14,8 @@ for (let file = 0; file < 8; file++) {
   }
 }
 function imagePath(piece) { return `/static/pieces/${piece.color[0]}${piece.type}.svg`; }
-function canInteract() { return !!state && state.phase === "human" && !busy && online; }
+function isPremoveTurn() { return !!state && ["opening","bot"].includes(state.phase); }
+function canInteract() { return !!state && (state.phase === "human" || isPremoveTurn()) && !busy && online; }
 function notice(message = "") { $("#notice").textContent = message; }
 function timeText(seconds) {
   const total = Math.max(0, Math.ceil(seconds));
@@ -34,7 +35,10 @@ function renderBoard() {
   const pieces = state ? state.pieces : initialPieces;
   const pieceMap = new Map(pieces.map(piece => [piece.square,piece]));
   const last = state?.move_history.at(-1)?.uci;
-  const destinations = new Set((state?.legal_moves || []).filter(move => move.slice(0,2) === selected).map(move => move.slice(2,4)));
+  const hints = isPremoveTurn() ? state.premove_moves : state?.legal_moves;
+  const destinations = new Set((hints || []).filter(move => move.slice(0,2) === selected).map(move => move.slice(2,4)));
+  const queued = state?.premove?.uci;
+  const refused = new Set((state?.refused_captures || []).filter(move=>move.slice(0,2)===selected).map(move=>move.slice(2,4)));
   const focusSquare = board.contains(document.activeElement) ? document.activeElement.dataset.square : null;
   const fragment = document.createDocumentFragment();
   for (let row=0; row<8; row++) for (let column=0; column<8; column++) {
@@ -52,6 +56,13 @@ function renderBoard() {
     button.classList.toggle("hint", destinations.has(square));
     button.classList.toggle("capture-hint", destinations.has(square) && !!piece);
     button.classList.toggle("own-piece", piece?.color === side);
+    button.classList.toggle("resting", !!piece?.id && piece.id === state?.resting_piece_id && piece.color === side && ["human","bot","penalty"].includes(state.phase));
+    button.classList.toggle("frozen", piece?.color === side && piece.type === "k");
+    button.classList.toggle("premove-square", !!queued && [queued.slice(0,2),queued.slice(2,4)].includes(square));
+    button.classList.toggle("premove-hint", isPremoveTurn() && destinations.has(square));
+    button.classList.toggle("refused", refused.has(square));
+    if (button.classList.contains("resting")) button.title="This physical piece must rest for your next move.";
+    if (button.classList.contains("frozen")) button.title="Your king cannot move, capture, or castle.";
     const turnColor = state?.fen.split(" ")[1] === "w" ? "white" : "black";
     button.classList.toggle("checked", !!state?.in_check && piece?.type === "k" && piece.color === turnColor);
     button.setAttribute("aria-label", `${square}${piece ? `, ${piece.color} ${names[piece.type]}` : ", empty"}`);
@@ -82,6 +93,9 @@ function renderState() {
   $("#resign-button").disabled = !active || busy || state.phase === "finished" || !online;
   $("#seed-button").disabled = !active;
   $("#seed-button").textContent = active ? state.seed : "—";
+  $("#premove-controls").hidden = !state?.premove;
+  $("#premove-label").textContent = state?.premove ? `Queued ${state.premove.uci} · guaranteed 15-second wait` : "";
+  $("#cancel-premove").disabled = !isPremoveTurn() || busy || !online;
   const humanColor = state?.human_color || color;
   $("#human-color").textContent = humanColor.toUpperCase();
   $("#bot-color").textContent = humanColor === "white" ? "BLACK" : "WHITE";
@@ -89,9 +103,9 @@ function renderState() {
   const changed = renderedRevision !== state.revision || renderedGame !== state.game_id || renderedColor !== humanColor;
   const content = {
     opening:["HEAD START", `Martin's opening · ${state.opening_done}/3`, "Three actions, all for Martin. Your clock begins as soon as he finishes."],
-    human:["YOUR TURN", state.in_check ? "Your king is in check." : "Your move. Take a breath.", "Your clock is running. Moving in under 3 seconds earns a real 15-second penalty."],
+    human:["YOUR TURN", state.in_check ? "Your frozen king is in check." : "Your move. Take a breath.", state.in_check ? "Your king cannot escape. Capture the checking piece or block the attack with a usable piece." : "Your clock is running. Muted pieces are resting. Moving in under 3 seconds earns a real 15-second penalty."],
     penalty:["PIECE DOWN", "A little too enthusiastic.", "You moved too quickly and knocked over a piece! Wait 15 seconds while your clock keeps running."],
-    bot:["MARTIN'S TURN", "Greatness takes a moment.", "Martin is considering something questionable. Your clock is paused."],
+    bot:["MARTIN'S TURN", "Greatness takes a moment.", "Your clock is paused. You may queue one premove—if it works, it guarantees a 15-second wait."],
     finished:["GAME OVER", state.result || "Game over.", state.winner === "human" ? "You survived the experiment. Care to try a different seed?" : "Every experiment teaches us something. Start a fresh game when you're ready."]
   }[state.phase];
   $("#phase-pill").textContent = content[0];
@@ -108,9 +122,11 @@ function renderState() {
     const row = document.createElement("div"); row.className = "history-row";
     const action = document.createElement("span"); action.className="action"; action.textContent=String(move.action).padStart(2,"0");
     const actor = document.createElement("span"); actor.className="actor"; actor.textContent=move.actor === "human" ? "You" : "Martin";
-    const san = document.createElement("span"); san.className="notation"; san.textContent=move.san; san.title=move.uci;
+    const san = document.createElement("span"); san.className="notation"; san.textContent=move.san;
+    san.title=move.intended_uci && move.intended_uci !== move.uci ? `Intended ${move.intended_uci}; played ${move.uci}` : move.uci;
     row.append(action,actor,san);
     if (move.phase === "opening") { const tag=document.createElement("span"); tag.className="opening-tag"; tag.textContent="HEAD START"; row.append(tag); }
+    else if (move.premove) { const tag=document.createElement("span"); tag.className="opening-tag premove-tag"; tag.textContent="PREMOVE"; row.append(tag); }
     rows.append(row);
   }
   if (state.move_history.length) history.replaceChildren(rows);
@@ -123,7 +139,6 @@ function renderState() {
   }
   if (changed) {
     clearDrag(); selected = null;
-    if (promotion && (promotion.revision !== state.revision || promotion.game_id !== state.game_id)) closePromotion();
     renderedRevision = state.revision; renderedGame = state.game_id; renderedColor = humanColor;
     renderBoard();
   }
@@ -180,33 +195,20 @@ async function poll() {
 }
 async function sendMove(uci) {
   if (!canInteract()) return;
-  const payload={move:uci,game_id:state.game_id,revision:state.revision};
+  const premoving=isPremoveTurn();
+  const payload={move:uci,game_id:state.game_id,revision:state.revision,target_turn:state.human_turn_index+1};
   busy=true; selected=null; notice(); renderBoard();
   try {
-    const data=await api("/api/move",payload);
+    const data=await api(premoving ? "/api/premove" : "/api/move",payload);
     if (data.accepted === false) notice(data.message || "Move rejected.");
   } catch(error) { notice(error.message); }
   finally { busy=false; renderState(); }
 }
 function chooseDestination(source,target) {
   if (!canInteract()) return;
-  const candidates=state.legal_moves.filter(move=>move.slice(0,2)===source && move.slice(2,4)===target);
-  if (candidates.some(move=>move.length === 5)) {
-    promotion={source,target,game_id:state.game_id,revision:state.revision};
-    const options=$("#promotion-options"); options.replaceChildren();
-    for (const type of ["q","r","b","n"]) {
-      const candidate=candidates.find(move=>move[4]===type); if (!candidate) continue;
-      const button=document.createElement("button"); button.type="button"; button.setAttribute("aria-label",`Promote to ${names[type]}`);
-      const img=document.createElement("img"); img.src=imagePath({color:state.human_color,type}); img.alt=names[type]; button.append(img);
-      button.addEventListener("click",()=>{ closePromotion(); sendMove(candidate); }); options.append(button);
-    }
-    $("#promotion-dialog").showModal();
-  } else {
-    // Attempts are validated on the server, even when no hint exists.
-    sendMove(source+target);
-  }
+  // The backend validates every attempt. Human pawns never show promotion UI.
+  sendMove(source+target);
 }
-function closePromotion() { promotion=null; $("#promotion-dialog").close(); }
 board.addEventListener("click",event=>{
   if (suppressClick) { suppressClick=false; return; }
   if (!canInteract()) return;
@@ -278,8 +280,16 @@ $("#confirm-resign").addEventListener("click",async()=>{
   try { await api("/api/resign",{game_id:state.game_id}); } catch(error) {notice(error.message);}
   finally {busy=false;renderState();}
 });
-$("#cancel-promotion").addEventListener("click",closePromotion);
-$("#promotion-dialog").addEventListener("cancel",()=>{promotion=null;});
+async function cancelPremove() {
+  selected=null; clearDrag(); renderBoard();
+  if (!state?.premove || !isPremoveTurn() || busy) return;
+  busy=true;
+  try {await api("/api/premove",{move:null,game_id:state.game_id,target_turn:state.human_turn_index+1});}
+  catch(error){notice(error.message);} finally {busy=false;renderState();}
+}
+$("#cancel-premove").addEventListener("click",cancelPremove);
+board.addEventListener("contextmenu",event=>{event.preventDefault();cancelPremove();});
+document.addEventListener("keydown",event=>{if(event.key==="Escape" && !document.querySelector("dialog[open]"))cancelPremove();});
 $("#seed-button").addEventListener("click",async()=>{
   if (!state) return;
   try {await navigator.clipboard.writeText(String(state.seed));notice("Game seed copied.");}

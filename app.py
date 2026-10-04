@@ -113,6 +113,19 @@ def create_app(*, start_scheduler=True, game_factory=Game):
                                                   body.get("revision"))
             return jsonify(game.snapshot(accepted, message)), 200 if accepted else 409
 
+    @app.post("/api/premove")
+    def premove():
+        game = find_game()
+        if not game:
+            return jsonify(error="Start a new game first."), 404
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify(error="Send a JSON object."), 400
+        with game.lock:
+            accepted, message = game.queue_premove(body.get("move"), body.get("game_id"),
+                                                   body.get("target_turn"))
+            return jsonify(game.snapshot(accepted, message)), 200 if accepted else 409
+
     @app.post("/api/resign")
     def resign():
         game = find_game()

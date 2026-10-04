@@ -12,7 +12,7 @@
 <body>
   <header class="site-header">
     <a href="/" class="brand" aria-label="Impossible Martin home"><span class="brand-mark">im<span>.</span></span><span>IMPOSSIBLE<br>MARTIN</span></a>
-    <div class="header-note"><span class="live-dot"></span> LOCAL CHESS EXPERIMENT <span class="version">01</span></div>
+    <div class="header-note"><span class="live-dot"></span> LOCAL CHESS EXPERIMENT <span class="version">02</span></div>
   </header>
   <main>
     <section class="intro">
@@ -36,6 +36,8 @@
           <div id="human-clock" class="clock"><span class="clock-dot"></span><span id="clock-value">20:00</span></div>
         </div>
         <div class="board-footer"><span>Click a piece, then a square. Or drag to move.</span><button id="resign-button" class="text-button" disabled>Resign ↗</button></div>
+        <div id="premove-controls" class="premove-controls" hidden><span id="premove-label"></span><button id="cancel-premove" class="text-button">Cancel premove ×</button></div>
+        <p class="board-legend"><span class="legend-rest"></span> Resting <span class="legend-frozen"></span> Frozen king <span class="legend-premove"></span> Premove · Esc or right-click to cancel</p>
       </section>
       <aside class="sidebar">
         <section class="status-card">
@@ -43,6 +45,7 @@
           <h2 id="status-title">Meet your unfair match.</h2>
           <p id="status-description">Martin isn't very good at chess. Unfortunately, he makes the rules.</p>
           <div class="rule-summary"><div><span>01</span><p><strong>Three moves for Martin.</strong>Before you get a single one.</p></div><div><span>02</span><p><strong>Think before you move.</strong>Under 3 seconds? A 15-second wait.</p></div><div><span>03</span><p><strong>Twenty minutes. Just for you.</strong>The clock runs during penalties, too.</p></div></div>
+          <details class="handicap-guide"><summary>Read the unfair fine print</summary><ul><li>Your king is frozen. Block or capture to escape check.</li><li>Pawns advance one square and never promote.</li><li>Rooks, bishops and queens cannot land on edges.</li><li>Every non-knight piece rests for your next turn.</li><li>Knights ignore fatigue and rest, but go astray 10% of the time.</li><li>Martin may refuse an unprotected capture (8%). A refused move stays blocked this turn. Your only legal move is protected from refusal.</li><li>Martin promotes a rank early and can take any piece that moves beside his pawn by reverse en passant.</li><li>Queue one premove during Martin's turn. If it works, a 15-second penalty is guaranteed.</li></ul></details>
           <div id="initial-controls"><label class="control-label">YOUR SIDE</label><div class="color-picker" id="initial-color-picker"><button type="button" data-color="white" class="chosen" aria-pressed="true"><span class="white-disc"></span> White</button><button type="button" data-color="black" aria-pressed="false"><span class="black-disc"></span> Black</button></div></div>
           <button id="new-game-button" class="primary-button">Start game <span>↗</span></button>
           <p class="small-note">Weak at chess. Perfect at spotting mate in one.</p>
@@ -57,7 +60,6 @@
   <footer class="site-footer"><span>IMPOSSIBLE MARTIN</span><span>An experiment in questionable chess etiquette.</span><span>NO ENGINE. NO MERCY.</span></footer>
 
   <dialog id="new-dialog"><form id="new-form"><p class="eyebrow">A FRESH EXPERIMENT</p><h2>Take your side.</h2><p class="dialog-copy">Martin always moves first. Three times, in fact.</p><div class="color-picker" id="dialog-color-picker"><button type="button" data-color="white" class="chosen" aria-pressed="true"><span class="white-disc"></span> White</button><button type="button" data-color="black" aria-pressed="false"><span class="black-disc"></span> Black</button></div><label class="seed-input-label" for="seed-input">Seed <span>optional · replay Martin's randomness</span></label><input id="seed-input" inputmode="numeric" type="text" pattern="[0-9]*" placeholder="Random each game" maxlength="16"><p id="new-dialog-error" class="dialog-error" role="alert"></p><div class="dialog-actions"><button type="button" id="cancel-new" class="secondary-button">Cancel</button><button type="submit" class="primary-button">Start game ↗</button></div></form></dialog>
-  <dialog id="promotion-dialog"><p class="eyebrow">PAWN PROMOTION</p><h2>Choose your piece.</h2><div id="promotion-options" class="promotion-options"></div><button id="cancel-promotion" class="text-button">Cancel move</button></dialog>
   <dialog id="resign-dialog"><p class="eyebrow">CALL IT A DAY?</p><h2>Resign this game?</h2><p class="dialog-copy">Martin will be insufferably proud of himself.</p><div class="dialog-actions"><button id="cancel-resign" class="secondary-button">Keep playing</button><button id="confirm-resign" class="primary-button">Resign</button></div></dialog>
 </body>
 </html>
