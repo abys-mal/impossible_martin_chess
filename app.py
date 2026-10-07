@@ -142,6 +142,6 @@ def create_app(*, start_scheduler=True, game_factory=Game):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    #logging.basicConfig(level=logging.INFO)
     create_app().run(host="127.0.0.1", port=int(os.environ.get("PORT", "5001")),
                      debug=False, threaded=True)
