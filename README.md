@@ -8,7 +8,9 @@ This project was inspired by this YouTube video: [https://www.youtube.com/watch?
 
 ## Run
 
-From this project directory:
+You must have [Python](https://www.python.org/) installed to be able to run this app.
+
+From this project directory, run the following commands in a terminal window:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
@@ -17,6 +19,8 @@ python app.py
 ```
 
 If activation is blocked, use `.\.venv\Scripts\python.exe app.py` directly.
+If you didn't set up a venv, you can skip the first command.
+
 Open **http://127.0.0.1:5001**. Set the `PORT` environment variable to use another
 port. The app binds to loopback and is designed for one local Python process.
 
