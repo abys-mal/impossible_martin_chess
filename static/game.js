@@ -52,6 +52,7 @@ function renderBoard() {
     button.dataset.square = square;
     button.classList.toggle("dark", (file+rank)%2 === 1);
     button.classList.toggle("selected", square === selected);
+    button.classList.toggle("drag-source", !!drag?.active && square === drag.source);
     button.classList.toggle("last-move", !!last && (last.slice(0,2) === square || last.slice(2,4) === square));
     button.classList.toggle("hint", destinations.has(square));
     button.classList.toggle("capture-hint", destinations.has(square) && !!piece);
@@ -138,7 +139,12 @@ function renderState() {
   $("#events").replaceChildren(events);
   }
   if (changed) {
-    clearDrag(); selected = null;
+    // A server update can arrive while a piece is held over the board.
+    // Keep that gesture only while the same physical piece is still at its source.
+    const keepDrag = drag && renderedGame === state.game_id && renderedColor === humanColor &&
+      canInteract() && state.pieces.some(piece => piece.id === drag.piece.id &&
+        piece.square === drag.source && piece.color === humanColor);
+    if (!keepDrag) { clearDrag(); selected = null; }
     renderedRevision = state.revision; renderedGame = state.game_id; renderedColor = humanColor;
     renderBoard();
   }
@@ -173,7 +179,7 @@ async function api(path, body) {
   if (serial >= appliedSerial) {
     appliedSerial=serial;
     if (data.game === null) {
-      state=null; renderedRevision=-1; renderedGame=null; selected=null; renderState();
+      clearDrag(); state=null; renderedRevision=-1; renderedGame=null; selected=null; renderState();
     } else if (data.game_id) {
       if (!state || data.game_id !== state.game_id || data.revision >= state.revision) {
         state=data; receiptTime=performance.now(); renderState();
@@ -234,7 +240,9 @@ document.addEventListener("pointermove",event=>{
   if (!drag || drag.pointer !== event.pointerId) return;
   if (!drag.active && Math.hypot(event.clientX-drag.x,event.clientY-drag.y)>7) {
     drag.active=true; selected=drag.source;
-    const saved=drag; renderBoard(); drag=saved;
+    // Capture on the stable board, since its square buttons are rebuilt on updates.
+    board.setPointerCapture(event.pointerId);
+    renderBoard();
     drag.ghost=document.createElement("img"); drag.ghost.className="drag-ghost"; drag.ghost.src=imagePath(drag.piece); drag.ghost.alt="";
     const size=board.clientWidth/8; drag.ghost.style.width=`${size}px`; drag.ghost.style.height=`${size}px`;
     document.body.append(drag.ghost); board.querySelector(`[data-square="${drag.source}"]`)?.classList.add("drag-source");
